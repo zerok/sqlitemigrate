@@ -37,10 +37,26 @@ func TestMigrate(t *testing.T) {
 	r.RegisterMigration([]string{"CREATE TABLE table1 (id integer primary key autoincrement)"}, []string{"DROP TABLE table1"})
 	require.NoError(t, r.Apply(ctx, db))
 	requireUserVersion(t, db, 1)
+	requireTableExists(t, db, "table1", true)
+	require.NoError(t, r.Reverse(ctx, db))
+	requireUserVersion(t, db, 0)
+	requireTableExists(t, db, "table1", false)
 }
 
 func requireUserVersion(t *testing.T, db *sql.DB, expected int) {
 	var actual int
 	require.NoError(t, db.QueryRow("PRAGMA user_version").Scan(&actual))
 	require.Equal(t, expected, actual)
+}
+
+func requireTableExists(t *testing.T, db *sql.DB, tablename string, exists bool) {
+	res, err := db.Query("SELECT * FROM " + tablename)
+	if res != nil {
+		res.Close()
+	}
+	if exists {
+		require.NoError(t, err, "Table seems not to exists")
+	} else {
+		require.Error(t, err, "Table seems to exist")
+	}
 }

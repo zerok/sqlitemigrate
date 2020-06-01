@@ -45,6 +45,22 @@ func (r *MigrationRegistry) Apply(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
+// Reverse tries to reverse the last applied migration.
+func (r *MigrationRegistry) Reverse(ctx context.Context, db *sql.DB) error {
+	current, err := r.GetCurrentVersion(ctx, db)
+	if err != nil {
+		return err
+	}
+	if current == 0 {
+		return nil
+	}
+	if current > len(r.migrations) {
+		return fmt.Errorf("current version number does not match known migration")
+	}
+	r.migrations[current-1].Version = current
+	return r.migrations[current-1].Reverse(ctx, db)
+}
+
 // RegisterMigration adds a new set of up- and down-statements to the registry.
 func (r *MigrationRegistry) RegisterMigration(ups []string, downs []string) {
 	m := Migration{
@@ -76,6 +92,24 @@ func (m *Migration) Apply(ctx context.Context, db *sql.DB) error {
 		}
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", m.Version)); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+func (m *Migration) Reverse(ctx context.Context, db *sql.DB) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	for _, down := range m.Down {
+		if _, err := tx.ExecContext(ctx, down); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", m.Version-1)); err != nil {
 		tx.Rollback()
 		return err
 	}
